@@ -16,13 +16,17 @@ public:
 };
 
 /**
- * Parse
+ * CPLEX error for attempting to invoke non-existent functionality.
  */
-IloBool isBaseJob(std::string& jobName)
+class NotImplementedError: public IloException
 {
-  return jobName.find("_", 2) != std::string::npos;
-}
+public:
+  NotImplementedError() : IloException("Not implemented") {}
+};
 
+/**
+ * Parse machine number from interval name.
+ */
 IloInt mchOf(std::string& jobName)
 {
   std::string::size_type n = jobName.find("_", 2);
@@ -36,6 +40,9 @@ IloInt mchOf(std::string& jobName)
   }
 }
 
+/**
+ * Parse job number from interval name.
+ */
 IloInt jobOf(std::string& jobName)
 {
   std::string::size_type n = jobName.find("_", 2);
@@ -51,6 +58,23 @@ IloInt jobOf(std::string& jobName)
 
 
 
+/**
+ * Creates base model for use in logic-based Benders.
+ *
+ * Creates model using parameter data. Explicitly models delays as intervals.
+ * Use to create scenario generation model.
+ *
+ * @param env Environment variable
+ * @param nbJobs Number of jobs
+ * @param nbMachines Number of machines
+ * @param releaseTimes Release times of job j
+ * @param processingTimes Processing time on machine i of job j
+ * @param delays Interval variable container for delay of machine i job j
+ * @param superJobs Interval variable container for machine i job j
+ * @param sequences Sequence variable container for machine i's jobs
+ * @param objExpr Expression for objective
+ * @return Base scheduling model
+ */
 IloModel makeBaseModel(
   IloEnv                        env,
   IloInt                        nbJobs,
@@ -158,19 +182,21 @@ IloModel makeBaseModel(
 
 
 /**
- * Creates simple scenario model for use in logic-based Benders.
+ * Creates simple scheduling model for use in logic-based Benders.
  *
- * Creates scenario model using parameter data. Primarily for use with logic-based Benders and scenario generation strategy.
+ * Creates scheduling model from parameter data with one interval variable
+ * per machine-job pair.  Use to generate the restricted master problem.
  *
  * @param env Environment variable
  * @param nbJobs Number of jobs
  * @param nbMachines Number of machines
  * @param releaseTimes Release times of job j
  * @param processingTimes Processing time on machine i of job j
+ * @param delayedJobs Jobs that are delayed (and have double the processing time)
  * @param jobs Interval variable container for machine i job j
  * @param sequences Sequence variable container for machine i's jobs
  * @param objExpr Expression for objective
- * @return Scenario model
+ * @return Simple scheduling model
  */
 IloModel makeSimpleModel(
   IloEnv                        env,
@@ -251,14 +277,16 @@ IloModel makeSimpleModel(
 /**
  * Creates deterministic version of model.
  *
- * Creates deterministic version of scheduling model.
+ * Creates deterministic counterpart of robust scheduling model.
  *
  * @param env Environment variable
  * @param nbJobs Number of jobs
  * @param nbMachines Number of machines
  * @param releaseTimes Release times of job j
  * @param processingTimes Processing time on machine i of job j
- * @return Scenario model
+ * @param jobs Interval variable container for machine i job j
+ * @param sequences Sequence variable container for machine i's jobs
+ * @return Deterministic model
  */
 IloModel makeDetrModel(
   IloEnv                        env,
@@ -274,54 +302,6 @@ IloModel makeDetrModel(
   IloIntervalVarArray delayedJobs(env);
   IloIntExpr objExpr;
   IloModel submodel = makeSimpleModel(env, nbJobs, nbMachines, releaseTimes, processingTimes, delayedJobs, jobs, sequences, objExpr);
-  model.add(submodel);
-
-  // OBJECTIVE
-  IloObjective objective = IloMinimize(env, objExpr);
-  model.add(objective);
-
-  return model;
-}
-
-IloModel makeScenarioSubmodel(
-  IloEnv                        env,
-  IloInt                        nbJobs,
-  IloInt                        nbMachines,
-  IloIntArray                   releaseTimes,
-  IloIntArray2                  processingTimes,
-  IloIntervalVarArray           delayedJobs,
-  IloIntervalVarArray2&         jobs,
-  IloIntervalSequenceVarArray&  sequences,
-  IloIntExpr&                   objExpr)
-{
-  IloModel model(env);
-  for (IloInt k = 0; k < delayedJobs.getSize(); k++)
-  {
-      IloIntervalVar itv = delayedJobs[k];
-      std::string itvname = itv.getName();
-      IloInt mchNum = mchOf(itvname);
-      IloInt jobNum = jobOf(itvname);
-      IloInt currProcTime = processingTimes[mchNum][jobNum];
-      processingTimes[mchNum][jobNum] = 2*currProcTime-1;
-  }
-
-}
-
-
-IloModel makeComplexMasterModel(
-  IloEnv                        env,
-  IloInt                        nbJobs,
-  IloInt                        nbMachines,
-  IloIntArray                   releaseTimes,
-  IloIntArray2                  processingTimes,
-  IloIntervalVarArray2&         delays,
-  IloIntervalVarArray2&         superJobs,
-  IloIntervalSequenceVarArray&  sequences)
-{
-  // Use makeBaseModel as base
-  IloModel model(env);
-  IloIntExpr objExpr;
-  IloModel submodel = makeBaseModel(env, nbJobs, nbMachines, releaseTimes, processingTimes, delays, superJobs, sequences, objExpr);
   model.add(submodel);
 
   // OBJECTIVE
@@ -351,6 +331,24 @@ static void reportMaster(IloCP& masterCP, IloIntervalSequenceVarArray& masterSeq
   masterCP.setOut(origOut);
 }
 
+/**
+ * Creates base scenario generation model for use in logic-based Benders.
+ *
+ * Creates base scenario generation model using parameter data. This model
+ * will be re-used over the course of the algorithm. makeWorstDelayModel(...)
+ * creates a complete model from the parameters.
+ *
+ * @param env Environment variable
+ * @param nbJobs Number of jobs
+ * @param nbMachines Number of machines
+ * @param releaseTimes Release times of job j
+ * @param processingTimes Processing time on machine i of job j
+ * @param maxMchDelays Maximum number of delays for jobs on machine i
+ * @param maxDelays Maximum number of delays over all jobs collectively
+ * @param superJobs Interval variable container for machine i job j
+ * @param sequences Sequence variable container for machine i's jobs
+ * @return Scenario generation model
+ */
 IloModel makeScenGenModel(
   IloEnv                        env,
   IloInt                        nbJobs,
@@ -426,6 +424,24 @@ static void reportSubmodel(IloCP& scenCP, IloInt iterNum, IloIntervalVarArray2& 
   scenCP.setOut(origOut);
 }
 
+/**
+ * Creates scenario generation model for use in logic-based Benders.
+ *
+ * Creates scenario generation model using parameter data. This is a complete
+ * model for finding the worst case scenario. makeScenGenModel(...) creates
+ * a model that is intended to be re-used.
+ *
+ * @param env Environment variable
+ * @param nbJobs Number of jobs
+ * @param nbMachines Number of machines
+ * @param releaseTimes Release times of job j
+ * @param processingTimes Processing time on machine i of job j
+ * @param maxMchDelays Maximum number of delays for jobs on machine i
+ * @param maxDelays Maximum number of delays over all jobs collectively
+ * @param soln Solution containing machine-job pairs to fix
+ * @param delays Interval variable container for delay of machine i job j
+ * @return Scenario generation model
+ */
 IloModel makeWorstDelayModel(
   IloEnv                  env,
   IloInt                  nbJobs,
@@ -474,12 +490,17 @@ IloModel makeWorstDelayModel(
   return model;
 }
 
-class NotImplementedError: public IloException
-{
-public:
-  NotImplementedError() : IloException("Not implemented") {}
-};
 
+/**
+ * Generate list of job tuples.
+ *
+ * Generate list of job tuples. Only works for tuple lengths <= 3.
+
+ * @param nbJobs Number of jobs
+ * @param nbMachines Number of machines
+ * @param tupLen Length of tuple
+ * @return Array of job tuples
+ */
 IloArray<IloArray<IloIntArray> > generateJobTuples(IloEnv env, IloInt nbJobs, IloInt nbMachines, IloInt tupLen)
 {
   IloArray<IloArray<IloIntArray> > allJobTuples(env);
@@ -564,6 +585,27 @@ IloArray<IloArray<IloIntArray> > generateJobTuples(IloEnv env, IloInt nbJobs, Il
   return allJobTuples;
 }
 
+/**
+ * Solve robust parallel scheduling problem with scenario enumeration.
+ *
+ * Solve robust parallel scheduling problem with scenario enumeration.
+ * This method adds all of the scenarios at once and solves one model,
+ * as opposed to scenario generation which solves the model many times
+ * but only adds one scenario per iteration.
+ *
+ * @param env Environment variable
+ * @param nbJobs Number of jobs
+ * @param nbMachines Number of machines
+ * @param releaseTimes Release times of job j
+ * @param processingTimes Processing time on machine i of job j
+ * @param maxMchDelays Maximum number of delays for jobs on machine i
+ * @param maxDelays Maximum number of delays over all jobs collectively
+ * @param outputDir Directory to output results
+ * @param filename Name of input data file
+ * @param numWorkers Maximum number of cores used by solver
+ * @param timeLimit Global time limit of algorithm
+ * @param failLimit Maximum number of failues allowed per search
+ */
 static void solveWithScenarioEnumeration(
   IloEnv                        env,
   IloInt                        nbJobs,
@@ -629,6 +671,26 @@ static void solveWithScenarioEnumeration(
   reportMaster(cp, sequences);
 }
 
+/**
+ * Solve robust parallel scheduling problem with scenario generation.
+ *
+ * Solve robust parallel scheduling problem with scenario generation.
+ * This method adds one scenario at a time and re-solves the master
+ * problem until it finds an optimal solution to the original problem.
+ *
+ * @param env Environment variable
+ * @param nbJobs Number of jobs
+ * @param nbMachines Number of machines
+ * @param releaseTimes Release times of job j
+ * @param processingTimes Processing time on machine i of job j
+ * @param maxMchDelays Maximum number of delays for jobs on machine i
+ * @param maxDelays Maximum number of delays over all jobs collectively
+ * @param outputDir Directory to output results
+ * @param filename Name of input data file
+ * @param numWorkers Maximum number of cores used by solver
+ * @param timeLimit Global time limit of algorithm
+ * @param failLimit Maximum number of failues allowed per search
+ */
 static void solveWithScenarioGeneration(
   IloEnv                        env,
   IloInt                        nbJobs,
@@ -643,6 +705,10 @@ static void solveWithScenarioGeneration(
   IloNum                        timeLimit,
   IloInt                        failLimit)
 {
+  // Global timer
+  IloTimer globalTimer(env);
+  globalTimer.restart();
+  IloNum localTimeLimit = 0;
   // SCENARIO GENERATION
   IloIntervalVarArray2 allDelayedJobs(env);
   allDelayedJobs.add(IloIntervalVarArray(env));
@@ -656,7 +722,6 @@ static void solveWithScenarioGeneration(
   IloObjective masterObjective = IloMinimize(env, IloMax(objExprArray));
   masterModel.add(masterObjective);
   IloCP masterCP(masterModel);
-  masterCP.setParameter(IloCP::TimeLimit, timeLimit);
   masterCP.setParameter(IloCP::FailLimit, failLimit);
   masterCP.setParameter(IloCP::Workers, numWorkers);
   // Algorithm paramters
@@ -674,7 +739,6 @@ static void solveWithScenarioGeneration(
   IloIntervalSequenceVarArray scenSequences;
   IloModel sgModel = makeScenGenModel(env, nbJobs, nbMachines, releaseTimes, processingTimes, maxMchDelays, maxDelays, scenDelays, scenJobs, scenSequences);
   IloCP scenCP(sgModel);
-  scenCP.setParameter(IloCP::TimeLimit, timeLimit);
   scenCP.setParameter(IloCP::FailLimit, failLimit);
   scenCP.setParameter(IloCP::Workers, numWorkers);
   // Algorithm paramters
@@ -682,18 +746,25 @@ static void solveWithScenarioGeneration(
 
   IloInt currIter = 0;
   std::ofstream statsFile(outputDir + "/stats.csv");
-  statsFile << "Phase,runTime,objVal" << std::endl;
+  statsFile << "Phase,ObjVal,SolveTime,TotalTime" << std::endl;
   for( ; ; currIter++)
   {
     masterCP.out() << "ITERATION " << currIter << std::endl;
     // Optimize over current master problem
+    localTimeLimit = IloMax(0, timeLimit - globalTimer.getTime());
+    masterCP.setParameter(IloCP::TimeLimit, localTimeLimit);
     masterCP.solve();
+    if (globalTimer.getTime() >= timeLimit)
+    {
+      env.out() << "Exceeded global time limit." << std::endl;
+      break;
+    }
     IloNum masterObjVal = masterCP.getObjValue();
     reportMaster(masterCP, masterSequences);
     std::ofstream masterSolnFile(outputDir + "/soln" + std::to_string(currIter) + ".out");
     reportMaster(masterCP, masterSequences, masterSolnFile);
     masterSolnFile.close();
-    statsFile << "M" << currIter << "," << masterCP.getTime() << "," << masterCP.getObjValue() << std::endl;
+    statsFile << "M" << currIter << "," << masterCP.getObjValue() << "," << masterCP.getInfo(IloCP::SolveTime) << "," << globalTimer.getTime() << std::endl;
     statsFile.flush();
 
     // Update scenario generation submodel based on master solution
@@ -737,12 +808,19 @@ static void solveWithScenarioGeneration(
     }
     
     // Solve scenario generation submodel
+    localTimeLimit = IloMax(0, timeLimit - globalTimer.getTime());
+    scenCP.setParameter(IloCP::TimeLimit, localTimeLimit);
     scenCP.solve();
+    if (globalTimer.getTime() >= timeLimit)
+    {
+      env.out() << "Exceeded global time limit." << std::endl;
+      break;
+    }
     reportSubmodel(scenCP, currIter, scenDelays);
     std::ofstream submodelSolnFile(outputDir + "/delays.out", std::ios_base::app);
     reportSubmodel(scenCP, currIter, scenDelays, submodelSolnFile);
     submodelSolnFile.close();
-    statsFile << "O" << currIter << "," << scenCP.getTime() << "," << scenCP.getObjValue() << std::endl;
+    statsFile << "O" << currIter << "," << scenCP.getObjValue() << "," << scenCP.getInfo(IloCP::SolveTime) << "," << globalTimer.getTime() << std::endl;
     statsFile.flush();
 
     // If optimal value of submodel is no worse than master, we are done.
@@ -790,23 +868,6 @@ static void solveWithScenarioGeneration(
   // Display statistics
   env.out() << "Objective: " << masterCP.getObjValue() << std::endl;
   env.out() << "Num Generated Scenarios: " << allDelayedJobs.getSize() << std::endl;
-  //for (IloInt t = 0; t < allDelayedJobs.getSize(); t++)
-  //{
-  //  masterCP.out() << "Scen\t" << t << ": [ ";
-  //  for (IloInt k = 0; k < allDelayedJobs[t].getSize(); k++)
-  //  {
-  //    if (k != 0)
-  //    {
-  //      masterCP.out() << ", ";
-  //    }
-  //    IloIntervalVar itv = allDelayedJobs[t][k];
-  //    std::string itvname = itv.getName();
-  //    IloInt mchNum = mchOf(itvname);
-  //    IloInt jobNum = jobOf(itvname);
-  //    masterCP.out() << "(" << mchNum << "," << jobNum << ")";
-  //  }
-  //  masterCP.out() << " ]" << std::endl;
-  //}
 }
 
 int main(int argc, const char* argv[])
