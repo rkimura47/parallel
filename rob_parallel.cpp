@@ -6,6 +6,8 @@
 typedef IloArray<IloBoolArray> IloBoolArray2;
 typedef IloArray<IloConstraintArray> IloConstraintArray2;
 
+enum class ObjFuncType { cmax, swct };
+
 /**
  * CPLEX error for failing to open file.
  */
@@ -81,6 +83,7 @@ IloModel makeBaseModel(
   IloInt                        nbMachines,
   IloIntArray                   releaseTimes,
   IloIntArray2                  processingTimes,
+  ObjFuncType                   objType,
   IloIntervalVarArray2&         delays,
   IloIntervalVarArray2&         superJobs,
   IloIntervalSequenceVarArray&  sequences,
@@ -174,7 +177,12 @@ IloModel makeBaseModel(
       ends.add(IloEndOf(superJobs[i][j]));
     }
   }
-  objExpr = IloMax(ends);
+  if (objType == ObjFuncType::cmax)
+    objExpr = IloMax(ends);
+  else if (objType == ObjFuncType::swct)
+    objExpr = IloSum(ends);
+  else
+    throw NotImplementedError();
 
   return model;
 }
@@ -204,6 +212,7 @@ IloModel makeSimpleModel(
   IloInt                        nbMachines,
   IloIntArray                   releaseTimes,
   IloIntArray2                  processingTimes,
+  ObjFuncType                   objType,
   IloIntervalVarArray           delayedJobs,
   IloIntervalVarArray2&         jobs,
   IloIntervalSequenceVarArray&  sequences,
@@ -269,7 +278,12 @@ IloModel makeSimpleModel(
       ends.add(IloEndOf(jobs[i][j]));
     }
   }
-  objExpr = IloMax(ends);
+  if (objType == ObjFuncType::cmax)
+    objExpr = IloMax(ends);
+  else if (objType == ObjFuncType::swct)
+    objExpr = IloSum(ends);
+  else
+    throw NotImplementedError();
 
   return scenModel;
 }
@@ -294,6 +308,7 @@ IloModel makeDetrModel(
   IloInt                        nbMachines,
   IloIntArray                   releaseTimes,
   IloIntArray2                  processingTimes,
+  ObjFuncType                   objType,
   IloIntervalVarArray2&         jobs,
   IloIntervalSequenceVarArray&  sequences)
 {
@@ -301,7 +316,7 @@ IloModel makeDetrModel(
   IloModel model(env);
   IloIntervalVarArray delayedJobs(env);
   IloIntExpr objExpr;
-  IloModel submodel = makeSimpleModel(env, nbJobs, nbMachines, releaseTimes, processingTimes, delayedJobs, jobs, sequences, objExpr);
+  IloModel submodel = makeSimpleModel(env, nbJobs, nbMachines, releaseTimes, processingTimes, objType, delayedJobs, jobs, sequences, objExpr);
   model.add(submodel);
 
   // OBJECTIVE
@@ -355,6 +370,7 @@ IloModel makeScenGenModel(
   IloInt                        nbMachines,
   IloIntArray                   releaseTimes,
   IloIntArray2                  processingTimes,
+  ObjFuncType                   objType,
   IloIntArray                   maxMchDelays,
   IloInt                        maxDelays,
   IloIntervalVarArray2&         delays,
@@ -364,7 +380,7 @@ IloModel makeScenGenModel(
   // Use makeBaseModel as base
   IloModel model(env);
   IloIntExpr objExpr;
-  IloModel submodel = makeBaseModel(env, nbJobs, nbMachines, releaseTimes, processingTimes, delays, superJobs, sequences, objExpr);
+  IloModel submodel = makeBaseModel(env, nbJobs, nbMachines, releaseTimes, processingTimes, objType, delays, superJobs, sequences, objExpr);
   model.add(submodel);
 
   // CONSTRAINTS
@@ -448,6 +464,7 @@ IloModel makeWorstDelayModel(
   IloInt                  nbMachines,
   IloIntArray             releaseTimes,
   IloIntArray2            processingTimes,
+  ObjFuncType             objType,
   IloIntArray             maxMchDelays,
   IloInt                  maxDelays,
   IloSolution&            soln,
@@ -456,7 +473,7 @@ IloModel makeWorstDelayModel(
   IloModel model(env);
   IloIntervalVarArray2 superJobs;
   IloIntervalSequenceVarArray sequences;
-  IloModel submodel = makeScenGenModel(env, nbJobs, nbMachines, releaseTimes, processingTimes, maxMchDelays, maxDelays, delays, superJobs, sequences);
+  IloModel submodel = makeScenGenModel(env, nbJobs, nbMachines, releaseTimes, processingTimes, objType, maxMchDelays, maxDelays, delays, superJobs, sequences);
   model.add(submodel);
 
   // SOLUTION BINDING CONSTRAINTS
@@ -612,6 +629,7 @@ static void solveWithScenarioEnumeration(
   IloInt                        nbMachines,
   IloIntArray                   releaseTimes,
   IloIntArray2                  processingTimes,
+  ObjFuncType                   objType,
   IloIntArray                   maxMchDelays,
   IloInt                        maxDelays,
   std::string                   outputDir,
@@ -625,7 +643,7 @@ static void solveWithScenarioEnumeration(
   IloIntervalVarArray2 jobs;
   IloIntervalSequenceVarArray sequences;
   IloIntExpr objExpr;
-  IloModel bigModel = makeSimpleModel(env, nbJobs, nbMachines, releaseTimes, processingTimes, delayedJobs, jobs, sequences, objExpr);
+  IloModel bigModel = makeSimpleModel(env, nbJobs, nbMachines, releaseTimes, processingTimes, objType, delayedJobs, jobs, sequences, objExpr);
   IloArray<IloArray<IloIntArray> > delayScenarios = generateJobTuples(env, nbJobs, nbMachines, maxDelays);
   IloIntExprArray objExprArray(env);
   objExprArray.add(objExpr);
@@ -643,7 +661,7 @@ static void solveWithScenarioEnumeration(
     IloIntervalVarArray2 submodelJobs;
     IloIntervalSequenceVarArray submodelSequences;
     IloIntExpr submodelObjExpr;
-    IloModel subModel = makeSimpleModel(env, nbJobs, nbMachines, releaseTimes, processingTimes, delayedJobs, submodelJobs, submodelSequences, submodelObjExpr);
+    IloModel subModel = makeSimpleModel(env, nbJobs, nbMachines, releaseTimes, processingTimes, objType, delayedJobs, submodelJobs, submodelSequences, submodelObjExpr);
     bigModel.add(subModel);
     // Add constraints linking submodel and master
     for (IloInt i = 0; i < nbMachines; i++)
@@ -697,6 +715,7 @@ static void solveWithScenarioGeneration(
   IloInt                        nbMachines,
   IloIntArray                   releaseTimes,
   IloIntArray2                  processingTimes,
+  ObjFuncType                   objType,
   IloIntArray                   maxMchDelays,
   IloInt                        maxDelays,
   std::string                   outputDir,
@@ -716,7 +735,7 @@ static void solveWithScenarioGeneration(
   IloIntervalVarArray2 masterJobs;
   IloIntervalSequenceVarArray masterSequences;
   IloIntExpr masterObjExpr;
-  IloModel masterModel = makeSimpleModel(env, nbJobs, nbMachines, releaseTimes, processingTimes, allDelayedJobs[0], masterJobs, masterSequences, masterObjExpr);
+  IloModel masterModel = makeSimpleModel(env, nbJobs, nbMachines, releaseTimes, processingTimes, objType, allDelayedJobs[0], masterJobs, masterSequences, masterObjExpr);
   IloIntExprArray objExprArray(env);
   objExprArray.add(masterObjExpr);
   IloObjective masterObjective = IloMinimize(env, IloMax(objExprArray));
@@ -737,7 +756,7 @@ static void solveWithScenarioGeneration(
   IloIntervalVarArray2 scenDelays;
   IloIntervalVarArray2 scenJobs;
   IloIntervalSequenceVarArray scenSequences;
-  IloModel sgModel = makeScenGenModel(env, nbJobs, nbMachines, releaseTimes, processingTimes, maxMchDelays, maxDelays, scenDelays, scenJobs, scenSequences);
+  IloModel sgModel = makeScenGenModel(env, nbJobs, nbMachines, releaseTimes, processingTimes, objType, maxMchDelays, maxDelays, scenDelays, scenJobs, scenSequences);
   IloCP scenCP(sgModel);
   scenCP.setParameter(IloCP::FailLimit, failLimit);
   scenCP.setParameter(IloCP::Workers, numWorkers);
@@ -847,7 +866,7 @@ static void solveWithScenarioGeneration(
     IloIntervalVarArray2 submodelJobs;
     IloIntervalSequenceVarArray submodelSequences;
     IloIntExpr submodelObjExpr;
-    IloModel subModel = makeSimpleModel(env, nbJobs, nbMachines, releaseTimes, processingTimes, delayedJobs, submodelJobs, submodelSequences, submodelObjExpr);
+    IloModel subModel = makeSimpleModel(env, nbJobs, nbMachines, releaseTimes, processingTimes, objType, delayedJobs, submodelJobs, submodelSequences, submodelObjExpr);
     masterModel.add(subModel);
     // Constraints linking subproblem and master
     for (IloInt i = 0; i < nbMachines; i++)
@@ -885,6 +904,9 @@ int main(int argc, const char* argv[])
   args::ValueFlag<int> failLimitP(parser, "failLimit", "Maximum number of failures during search", {'F', "failLimit"}, failLimitDefaultValue);
   args::ValueFlag<std::string> dataDirP(parser, "dataDir", "Directory containing data files", {"dataDir"}, dataDirDefaultValue);
   args::ValueFlag<std::string> outputDirP(parser, "outputDir", "Directory to store output", {"outputDir"}, outputDirDefaultValue);
+  args::Group objGroup(parser, "Objective (specify EXACTLY one)", args::Group::Validators::Xor);
+  args::Flag cmaxF(objGroup, "cmax", "CMAX objective", {"cmax"});
+  args::Flag swctF(objGroup, "swct", "SWCT objective", {"swct"});
   args::Positional<std::string> filenameP(parser, "file", "Input filename", "default");
   args::Positional<int> maxNbDelaysP(parser, "maxNbDelays", "Maximum number of delays", 1);
   try
@@ -902,6 +924,19 @@ int main(int argc, const char* argv[])
     std::cerr << parser;
     return 1;
   }
+  catch (args::ValidationError e)
+  {
+    if(cmaxF == swctF)
+    {
+      std::cerr << "Must specify EXACTLY ONE of --cmax or --swct." << std::endl;
+    }
+    else
+    {
+      std::cerr << e.what() << std::endl;
+    }
+    std::cerr << parser;
+    return 1;
+  }
 
   IloEnv env;
   try
@@ -914,6 +949,13 @@ int main(int argc, const char* argv[])
     std::string outputDir = args::get(outputDirP);
     std::string filename = args::get(filenameP);
     IloInt maxNbDelays = args::get(maxNbDelaysP);
+    ObjFuncType objType;
+    if (cmaxF)
+      objType = ObjFuncType::cmax;
+    else if (swctF)
+      objType = ObjFuncType::swct;
+    else
+      throw NotImplementedError();
 
     // Open input data file
     std::ifstream file(dataDir + "/" + filename + ".data");
@@ -969,8 +1011,8 @@ int main(int argc, const char* argv[])
     cmdLineCopy << " " << filename << " " << maxNbDelays << std::endl;
     cmdLineCopy.close();
 
-    //solveWithScenarioEnumeration(env, nbJobs, nbMachines, releaseTimes, processingTimes, maxMchDelays, maxDelays, outputDir, filename, numWorkers, timeLimit, failLimit);
-    solveWithScenarioGeneration(env, nbJobs, nbMachines, releaseTimes, processingTimes, maxMchDelays, maxDelays, outputDir, filename, numWorkers, timeLimit, failLimit);
+    //solveWithScenarioEnumeration(env, nbJobs, nbMachines, releaseTimes, processingTimes, objType, maxMchDelays, maxDelays, outputDir, filename, numWorkers, timeLimit, failLimit);
+    solveWithScenarioGeneration(env, nbJobs, nbMachines, releaseTimes, processingTimes, objType, maxMchDelays, maxDelays, outputDir, filename, numWorkers, timeLimit, failLimit);
 
   }
   catch(const IloException& e)
