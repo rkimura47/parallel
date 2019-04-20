@@ -638,6 +638,9 @@ static void solveWithScenarioEnumeration(
   IloNum                        timeLimit,
   IloInt                        failLimit)
 {
+  // Global timer
+  IloTimer globalTimer(env);
+  globalTimer.restart();
   // SCENARIO ENUMERATION
   IloIntervalVarArray delayedJobs(env);
   IloIntervalVarArray2 jobs;
@@ -687,6 +690,10 @@ static void solveWithScenarioEnumeration(
   // Solve and report solution
   cp.solve();
   reportMaster(cp, sequences);
+  std::ofstream statsFile(outputDir + "/stats.csv");
+  statsFile << "Phase,ObjVal,SolveTime,TotalTime" << std::endl;
+  statsFile << "M0," << cp.getObjValue() << "," << cp.getInfo(IloCP::SolveTime) << "," << globalTimer.getTime() << std::endl;
+  statsFile.flush();
 }
 
 /**
