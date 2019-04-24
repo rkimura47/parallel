@@ -146,7 +146,7 @@ IloModel makeBaseModel(
       // Fixed job is immediately preceded by its delay.
       model.add(IloEndAtStart(env, delays[i][j], origJobs[i][j]));
       // Release times
-      delays[i][j].setStartMin(releaseTimes[j]);
+      superJobs[i][j].setStartMin(releaseTimes[j]);
     }
   }
   // Each job can only go on one machine.
@@ -389,7 +389,7 @@ IloModel makeScenGenModel(
   {
     for (IloInt j = 0; j < nbJobs; j++)
     {
-      model.add( IloStartOf(superJobs[i][j]) == IloEndOfPrevious(sequences[i], superJobs[i][j], 0) );
+      model.add( IloStartOf(superJobs[i][j]) == IloEndOfPrevious(sequences[i], superJobs[i][j], superJobs[i][j].getStartMin()) );
     }
   }
   // Machine delay constraints
@@ -1007,6 +1007,12 @@ int main(int argc, const char* argv[])
     // Write command to file
     std::ofstream cmdLineCopy(outputDir + "/" + filename + ".command");
     cmdLineCopy << argv[0];
+    if (objType == ObjFuncType::cmax)
+      cmdLineCopy << " --cmax";
+    else if (objType == ObjFuncType::swct)
+      cmdLineCopy << " --swct";
+    else
+      throw NotImplementedError();
     if (numWorkers != numWorkersDefaultValue)
       cmdLineCopy << " --numWorkers " << numWorkers;
     if (timeLimit != timeLimitDefaultValue)
