@@ -146,7 +146,7 @@ IloModel makeBaseModel(
       // Fixed job is immediately preceded by its delay.
       model.add(IloEndAtStart(env, delays[i][j], origJobs[i][j]));
       // Release times
-      superJobs[i][j].setStartMin(releaseTimes[j]);
+      delays[i][j].setStartMin(releaseTimes[j]);
     }
   }
   // Each job can only go on one machine.
@@ -340,7 +340,7 @@ static void reportMaster(IloCP& masterCP, IloIntervalSequenceVarArray& masterSeq
       std::string itvname = itv.getName();
       IloInt mchNum = mchOf(itvname);
       IloInt jobNum = jobOf(itvname);
-      masterCP.out() << itvname << " " << masterCP.getStart(itv) << " " << masterCP.getEnd(itv) << std::endl;
+      masterCP.out() << itvname << " [" << masterCP.getStart(itv) << "-" << masterCP.getEnd(itv) << "]" << std::endl;
     }
   }
   masterCP.setOut(origOut);
@@ -389,7 +389,7 @@ IloModel makeScenGenModel(
   {
     for (IloInt j = 0; j < nbJobs; j++)
     {
-      model.add( IloStartOf(superJobs[i][j]) == IloEndOfPrevious(sequences[i], superJobs[i][j], superJobs[i][j].getStartMin()) );
+      model.add( IloStartOf(superJobs[i][j]) == IloEndOfPrevious(sequences[i], superJobs[i][j], releaseTimes[j]) );
     }
   }
   // Machine delay constraints
@@ -418,12 +418,30 @@ IloModel makeScenGenModel(
   return model;
 }
 
-static void reportSubmodel(IloCP& scenCP, IloInt iterNum, IloIntervalVarArray2& scenDelays, std::ostream& out=std::cout)
+static void reportSubmodel(IloCP& scenCP, IloIntervalVarArray2& scenDelays)
 {
   // Display subproblem solution
+  scenCP.out() << "SubprobObjective \t:" << scenCP.getObjValue() << std::endl;
+  for (IloInt i = 0; i < scenDelays.getSize(); i++)
+  {
+    for (IloInt j = 0; j < scenDelays[i].getSize(); j++)
+    {
+      if (scenCP.isPresent(scenDelays[i][j]))
+      {
+        IloIntervalVar itv = scenDelays[i][j];
+        std::string itvname = itv.getName();
+        scenCP.out() << itvname << std::endl;
+      }
+    }
+  }
+}
+
+static void recordDelay(IloCP& scenCP, IloInt iterNum, IloIntervalVarArray2& scenDelays, std::ostream& out=std::cout)
+{
+  // Record worst case delay found
   std::ostream& origOut = scenCP.out();
   scenCP.setOut(out);
-  scenCP.out() << "Iter " << iterNum << ": " << scenCP.getObjValue();
+  scenCP.out() << "Iter " << iterNum << ":";
   for (IloInt i = 0; i < scenDelays.getSize(); i++)
   {
     for (IloInt j = 0; j < scenDelays[i].getSize(); j++)
@@ -770,10 +788,9 @@ static void solveWithScenarioGeneration(
   // Algorithm paramters
   scenCP.setParameter(IloCP::NoOverlapInferenceLevel, IloCP::Extended);
 
-  IloInt currIter = 0;
   std::ofstream statsFile(outputDir + "/stats.csv");
   statsFile << "Phase,ObjVal,SolveTime,TotalTime" << std::endl;
-  for( ; ; currIter++)
+  for(IloInt currIter = 0 ; ; currIter++)
   {
     masterCP.out() << "ITERATION " << currIter << std::endl;
     // Optimize over current master problem
@@ -832,6 +849,42 @@ static void solveWithScenarioGeneration(
         prec = curr;
       }
     }
+/*
+    // Construct scenario generation submodel
+    IloIntervalVarArray2 scenDelays;
+    IloIntervalVarArray2 scenJobs;
+    IloIntervalSequenceVarArray scenSequences;
+    IloModel sgModel = makeScenGenModel(env, nbJobs, nbMachines, releaseTimes, processingTimes, objType, maxMchDelays, maxDelays, scenDelays, scenJobs, scenSequences);
+    IloCP scenCP(sgModel);
+    scenCP.setParameter(IloCP::FailLimit, failLimit);
+    scenCP.setParameter(IloCP::Workers, numWorkers);
+    // Algorithm paramters
+    scenCP.setParameter(IloCP::NoOverlapInferenceLevel, IloCP::Extended);
+    for (IloInt i = 0; i < nbMachines; i++)
+    {
+      for (IloInt j = 0; j < nbJobs; j++)
+      {
+        IloConstraint cc = (IloPresenceOf(env, scenJobs[i][j]) == masterCP.isPresent(masterJobs[i][j]));
+        sgModel.add(cc);
+      }
+    }
+    for (IloInt i = 0; i < nbMachines; i++)
+    {
+      IloIntervalSequenceVar seq = masterSequences[i];
+      IloInt prec = -1;
+      for (IloIntervalVar itv = masterCP.getFirst(seq); itv.getImpl() != 0; itv = masterCP.getNext(seq, itv))
+      {
+        std::string itvname = itv.getName();
+        IloInt curr = jobOf(itvname);
+        if(prec != -1)
+        {
+          IloConstraint cc = IloPrevious(env, scenSequences[i], scenJobs[i][prec], scenJobs[i][curr]);
+          sgModel.add(cc);
+        }
+        prec = curr;
+      }
+    }
+*/
     
     // Solve scenario generation submodel
     localTimeLimit = IloMax(0, timeLimit - globalTimer.getTime());
@@ -842,9 +895,9 @@ static void solveWithScenarioGeneration(
       env.out() << "Exceeded global time limit." << std::endl;
       break;
     }
-    reportSubmodel(scenCP, currIter, scenDelays);
+    reportSubmodel(scenCP, scenDelays);
     std::ofstream submodelSolnFile(outputDir + "/delays.out", std::ios_base::app);
-    reportSubmodel(scenCP, currIter, scenDelays, submodelSolnFile);
+    recordDelay(scenCP, currIter, scenDelays, submodelSolnFile);
     submodelSolnFile.close();
     statsFile << "O" << currIter << "," << scenCP.getObjValue() << "," << scenCP.getInfo(IloCP::SolveTime) << "," << globalTimer.getTime() << std::endl;
     statsFile.flush();
@@ -892,7 +945,7 @@ static void solveWithScenarioGeneration(
   statsFile.close();
 
   // Display statistics
-  env.out() << "Objective: " << masterCP.getObjValue() << std::endl;
+  env.out() << "Final Objective: " << masterCP.getObjValue() << std::endl;
   env.out() << "Num Generated Scenarios: " << allDelayedJobs.getSize() << std::endl;
 }
 
