@@ -802,6 +802,13 @@ static void solveWithScenarioGeneration(
       env.out() << "Exceeded global time limit." << std::endl;
       break;
     }
+    if (masterCP.getInfo(IloCP::FailStatus) == IloCP::SearchStoppedByLimit)
+    // Starting with CPLEX 12.9.0, use the following instead:
+    //if (masterCP.getInfo(IloCP::SearchStatus) == IloCP::SearchStopped && masterCP.getInfo(IloCP::SearchStopCause) == IloCP::SearchStoppedByLimit)
+    {
+      env.out() << "Search stopped by limit." << std::endl;
+      break;
+    }
     IloNum masterObjVal = masterCP.getObjValue();
     reportMaster(masterCP, masterSequences);
     std::ofstream masterSolnFile(outputDir + "/soln" + std::to_string(currIter) + ".out");
@@ -849,42 +856,6 @@ static void solveWithScenarioGeneration(
         prec = curr;
       }
     }
-/*
-    // Construct scenario generation submodel
-    IloIntervalVarArray2 scenDelays;
-    IloIntervalVarArray2 scenJobs;
-    IloIntervalSequenceVarArray scenSequences;
-    IloModel sgModel = makeScenGenModel(env, nbJobs, nbMachines, releaseTimes, processingTimes, objType, maxMchDelays, maxDelays, scenDelays, scenJobs, scenSequences);
-    IloCP scenCP(sgModel);
-    scenCP.setParameter(IloCP::FailLimit, failLimit);
-    scenCP.setParameter(IloCP::Workers, numWorkers);
-    // Algorithm paramters
-    scenCP.setParameter(IloCP::NoOverlapInferenceLevel, IloCP::Extended);
-    for (IloInt i = 0; i < nbMachines; i++)
-    {
-      for (IloInt j = 0; j < nbJobs; j++)
-      {
-        IloConstraint cc = (IloPresenceOf(env, scenJobs[i][j]) == masterCP.isPresent(masterJobs[i][j]));
-        sgModel.add(cc);
-      }
-    }
-    for (IloInt i = 0; i < nbMachines; i++)
-    {
-      IloIntervalSequenceVar seq = masterSequences[i];
-      IloInt prec = -1;
-      for (IloIntervalVar itv = masterCP.getFirst(seq); itv.getImpl() != 0; itv = masterCP.getNext(seq, itv))
-      {
-        std::string itvname = itv.getName();
-        IloInt curr = jobOf(itvname);
-        if(prec != -1)
-        {
-          IloConstraint cc = IloPrevious(env, scenSequences[i], scenJobs[i][prec], scenJobs[i][curr]);
-          sgModel.add(cc);
-        }
-        prec = curr;
-      }
-    }
-*/
     
     // Solve scenario generation submodel
     localTimeLimit = IloMax(0, timeLimit - globalTimer.getTime());
@@ -893,6 +864,13 @@ static void solveWithScenarioGeneration(
     if (globalTimer.getTime() >= timeLimit)
     {
       env.out() << "Exceeded global time limit." << std::endl;
+      break;
+    }
+    if (masterCP.getInfo(IloCP::FailStatus) == IloCP::SearchStoppedByLimit)
+    // Starting with CPLEX 12.9.0, use the following instead:
+    //if (masterCP.getInfo(IloCP::SearchStatus) == IloCP::SearchStopped && masterCP.getInfo(IloCP::SearchStopCause) == IloCP::SearchStoppedByLimit)
+    {
+      env.out() << "Search stopped by limit." << std::endl;
       break;
     }
     reportSubmodel(scenCP, scenDelays);
@@ -952,16 +930,16 @@ static void solveWithScenarioGeneration(
 int main(int argc, const char* argv[])
 {
   // Parse command line
-  const int numWorkersDefaultValue = 1;
-  const int timeLimitDefaultValue = 3600;
-  const int failLimitDefaultValue = 2500000;
+  const IloInt numWorkersDefaultValue = 1;
+  const IloNum timeLimitDefaultValue = 3600;
+  const IloInt failLimitDefaultValue = IloIntMax;
   const std::string dataDirDefaultValue = "data";
   const std::string outputDirDefaultValue = ".";
   args::ArgumentParser parser("Robust parallel machine scheduling.");
   args::HelpFlag help(parser, "help", "Display this help menu", {'h', "help"});
-  args::ValueFlag<int> numWorkersP(parser, "numWorkers", "Number of cores to use", {'W', "numWorkers"}, numWorkersDefaultValue);
-  args::ValueFlag<float> timeLimitP(parser, "timeLimit", "Maximum number of seconds spent during search", {'T', "timeLimit"}, timeLimitDefaultValue);
-  args::ValueFlag<int> failLimitP(parser, "failLimit", "Maximum number of failures during search", {'F', "failLimit"}, failLimitDefaultValue);
+  args::ValueFlag<IloInt> numWorkersP(parser, "numWorkers", "Number of cores to use", {'W', "numWorkers"}, numWorkersDefaultValue);
+  args::ValueFlag<IloNum> timeLimitP(parser, "timeLimit", "Maximum number of seconds spent during search", {'T', "timeLimit"}, timeLimitDefaultValue);
+  args::ValueFlag<IloInt> failLimitP(parser, "failLimit", "Maximum number of failures during search", {'F', "failLimit"}, failLimitDefaultValue);
   args::ValueFlag<std::string> dataDirP(parser, "dataDir", "Directory containing data files", {"dataDir"}, dataDirDefaultValue);
   args::ValueFlag<std::string> outputDirP(parser, "outputDir", "Directory to store output", {"outputDir"}, outputDirDefaultValue);
   args::Group objGroup(parser, "Objective (specify EXACTLY one)", args::Group::Validators::Xor);
