@@ -389,7 +389,7 @@ IloModel makeScenGenModel(
   {
     for (IloInt j = 0; j < nbJobs; j++)
     {
-      model.add( IloStartOf(superJobs[i][j]) == IloEndOfPrevious(sequences[i], superJobs[i][j], releaseTimes[j]) );
+      model.add( IloStartOf(superJobs[i][j], releaseTimes[j]) == IloMax(IloEndOfPrevious(sequences[i], superJobs[i][j], releaseTimes[j]), releaseTimes[j]));
     }
   }
   // Machine delay constraints
