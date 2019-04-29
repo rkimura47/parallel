@@ -708,7 +708,7 @@ static void solveWithScenarioEnumeration(
   // Solve and report solution
   cp.solve();
   reportMaster(cp, sequences);
-  std::ofstream statsFile(outputDir + "/stats.csv");
+  std::ofstream statsFile(outputDir + "/statsEnum.csv");
   statsFile << "Phase,ObjVal,SolveTime,TotalTime" << std::endl;
   statsFile << "M0," << cp.getObjValue() << "," << cp.getInfo(IloCP::SolveTime) << "," << globalTimer.getTime() << std::endl;
   statsFile.flush();
@@ -945,6 +945,7 @@ int main(int argc, const char* argv[])
   args::Group objGroup(parser, "Objective (specify EXACTLY one)", args::Group::Validators::Xor);
   args::Flag cmaxF(objGroup, "cmax", "CMAX objective", {"cmax"});
   args::Flag swctF(objGroup, "swct", "SWCT objective", {"swct"});
+  args::Flag solveWithEnumF(parser, "solveWithEnum", "Solve using scenario enumeration instead of generation", {"solveWithEnum"});
   args::Positional<std::string> filenameP(parser, "file", "Input filename", "default");
   args::Positional<int> maxNbDelaysP(parser, "maxNbDelays", "Maximum number of delays", 1);
   try
@@ -994,6 +995,7 @@ int main(int argc, const char* argv[])
       objType = ObjFuncType::swct;
     else
       throw NotImplementedError();
+    IloBool solveWithEnum = solveWithEnumF;
 
     // Open input data file
     std::ifstream file(dataDir + "/" + filename + ".data");
@@ -1044,6 +1046,8 @@ int main(int argc, const char* argv[])
       cmdLineCopy << " --swct";
     else
       throw NotImplementedError();
+    if (solveWithEnum)
+      cmdLineCopy << " --solveWithEnum";
     if (numWorkers != numWorkersDefaultValue)
       cmdLineCopy << " --numWorkers " << numWorkers;
     if (timeLimit != timeLimitDefaultValue)
@@ -1055,8 +1059,10 @@ int main(int argc, const char* argv[])
     cmdLineCopy << " " << filename << " " << maxNbDelays << std::endl;
     cmdLineCopy.close();
 
-    //solveWithScenarioEnumeration(env, nbJobs, nbMachines, releaseTimes, processingTimes, objType, maxMchDelays, maxDelays, outputDir, filename, numWorkers, timeLimit, failLimit);
-    solveWithScenarioGeneration(env, nbJobs, nbMachines, releaseTimes, processingTimes, objType, maxMchDelays, maxDelays, outputDir, filename, numWorkers, timeLimit, failLimit);
+    if (solveWithEnum)
+        solveWithScenarioEnumeration(env, nbJobs, nbMachines, releaseTimes, processingTimes, objType, maxMchDelays, maxDelays, outputDir, filename, numWorkers, timeLimit, failLimit);
+    else
+        solveWithScenarioGeneration(env, nbJobs, nbMachines, releaseTimes, processingTimes, objType, maxMchDelays, maxDelays, outputDir, filename, numWorkers, timeLimit, failLimit);
 
   }
   catch(const IloException& e)
