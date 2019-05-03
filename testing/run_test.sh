@@ -14,6 +14,6 @@ while read -r rawLine; do
 
   mkdir -p $resultsDir/$outputDir
   cp ./instances/${instance}.data ./$resultsDir/$outputDir
-  /home/rkimura/RobustSched/parallel/rob_parallel --dataDir=instances --outputDir=$resultsDir/$outputDir --$obj $instance $nb > $resultsDir/$outputDir/output
+  ../rob_parallel --dataDir=instances --outputDir=$resultsDir/$outputDir --$obj $instance $nb > $resultsDir/$outputDir/output
 done < "params_list"
 # Yes, Bash is weird and the filename goes at the END of the loop.
