@@ -802,9 +802,7 @@ static void solveWithScenarioGeneration(
       env.out() << "Exceeded global time limit." << std::endl;
       break;
     }
-    if (masterCP.getInfo(IloCP::FailStatus) == IloCP::SearchStoppedByLimit)
-    // Starting with CPLEX 12.9.0, use the following instead:
-    //if (masterCP.getInfo(IloCP::SearchStatus) == IloCP::SearchStopped && masterCP.getInfo(IloCP::SearchStopCause) == IloCP::SearchStoppedByLimit)
+    if (masterCP.getInfo(IloCP::SearchStatus) == IloCP::SearchStopped && masterCP.getInfo(IloCP::SearchStopCause) == IloCP::SearchStoppedByLimit)
     {
       env.out() << "Search stopped by limit." << std::endl;
       break;
@@ -866,9 +864,7 @@ static void solveWithScenarioGeneration(
       env.out() << "Exceeded global time limit." << std::endl;
       break;
     }
-    if (masterCP.getInfo(IloCP::FailStatus) == IloCP::SearchStoppedByLimit)
-    // Starting with CPLEX 12.9.0, use the following instead:
-    //if (masterCP.getInfo(IloCP::SearchStatus) == IloCP::SearchStopped && masterCP.getInfo(IloCP::SearchStopCause) == IloCP::SearchStoppedByLimit)
+    if (masterCP.getInfo(IloCP::SearchStatus) == IloCP::SearchStopped && masterCP.getInfo(IloCP::SearchStopCause) == IloCP::SearchStoppedByLimit)
     {
       env.out() << "Search stopped by limit." << std::endl;
       break;

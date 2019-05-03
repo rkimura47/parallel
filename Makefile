@@ -8,7 +8,7 @@ MODEL_NAMES = rob_parallel
 # BEGIN MAKEFILE
 CCC = g++
 # Options with and without debug info
-CCOPT = -m64 -std=c++11 -g -DIL_STD
+CCOPT = -m64 -std=c++11 -g -DIL_STD -Wno-ignored-attributes
 #CCOPT = -m64 -std=c++11 -O -DNDEBUG -DIL_STD -Wno-ignored-attributes
 
 CONCERTDIR    = $(CPLEX_ROOT)/concert
